@@ -1,0 +1,129 @@
+import streamlit as st
+import cv2
+import numpy as np
+import tensorflow as tf
+from moviepy.editor import VideoFileClip
+import tempfile
+import shutil
+
+# Load pre-trained inpainting or coloring model
+def load_coloring_model(style='simple'):
+    # Placeholder function: Use actual paths to your models
+    if style == 'simple':
+        model = tf.keras.models.load_model('path_to_simple_coloring_model')
+    elif style == 'watercolor':
+        model = tf.keras.models.load_model('path_to_watercolor_coloring_model')
+    elif style == 'cel_shading':
+        model = tf.keras.models.load_model('path_to_cel_shading_coloring_model')
+    return model
+
+# Function to extract frames from video
+def extract_frames(video_path):
+    cap = cv2.VideoCapture(video_path)
+    frames = []
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames.append(frame)
+    cap.release()
+    return frames
+
+# Function to colorize a frame based on selected style using the pre-trained model
+def colorize_frame(model, frame, style='simple'):
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame_rgb = np.expand_dims(frame_rgb, axis=0)  # Add batch dimension
+    colored_frame = model.predict(frame_rgb)
+    colored_frame = np.squeeze(colored_frame, axis=0)  # Remove batch dimension
+    colored_frame = cv2.cvtColor(colored_frame.astype(np.uint8), cv2.COLOR_RGB2BGR)
+    return colored_frame
+
+# Function to apply watercolor effect
+def apply_watercolor_effect(frame):
+    # Simple watercolor effect: Apply a blur and sharpen effect
+    blurred = cv2.GaussianBlur(frame, (15, 15), 0)
+    watercolor_frame = cv2.addWeighted(frame, 0.5, blurred, 0.5, 0)
+    return watercolor_frame
+
+# Function to apply cel shading effect (example)
+def apply_cel_shading_effect(frame):
+    # Convert to grayscale
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    # Apply edge detection to simulate hard shadows
+    edges = cv2.Canny(gray, 100, 200)
+    # Merge back with the original image (you can adjust the weight)
+    cel_shaded_frame = cv2.bitwise_and(frame, frame, mask=edges)
+    return cel_shaded_frame
+
+# Function to reassemble frames into a video with chosen FPS
+def create_video_from_frames(frames, output_video_path, fps=24):
+    height, width, _ = frames[0].shape
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+    for frame in frames:
+        out.write(frame)
+    out.release()
+
+# Main function to process the video with options for FPS and animation style
+def process_video(uploaded_file, fps, style):
+    # Create a temporary directory to save processed frames
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        # Step 1: Extract frames from video
+        video_path = uploaded_file.name
+        with open(video_path, 'wb') as f:
+            f.write(uploaded_file.getbuffer())
+        
+        frames = extract_frames(video_path)
+
+        # Step 2: Load the pre-trained coloring model based on selected style
+        coloring_model = load_coloring_model(style)
+
+        # Step 3: Process each frame to add color based on the selected style
+        colored_frames = []
+        for frame in frames:
+            if style == 'simple':
+                colored_frame = colorize_frame(coloring_model, frame, style)
+            elif style == 'watercolor':
+                colored_frame = apply_watercolor_effect(frame)
+            elif style == 'cel_shading':
+                colored_frame = apply_cel_shading_effect(frame)
+            colored_frames.append(colored_frame)
+
+        # Step 4: Create a new video from the colored frames
+        output_video_path = tmpdirname + '/output_full_animation.mp4'
+        create_video_from_frames(colored_frames, output_video_path, fps)
+        return output_video_path
+
+# Streamlit App Layout
+def main():
+    st.title("Animatic to Full Animation")
+
+    # File uploader to select video
+    uploaded_file = st.file_uploader("Choose a video file", type=["mp4"])
+    if uploaded_file is not None:
+        # Show the uploaded video as a preview
+        st.video(uploaded_file)
+
+        # User selects FPS
+        fps = st.slider("Select FPS", 10, 60, 24)
+
+        # User selects Animation Style
+        style = st.selectbox("Choose Animation Style", ['simple', 'watercolor', 'cel_shading'])
+
+        # Process the video on button click
+        if st.button('Process Video'):
+            st.write("Processing... Please wait.")
+            output_video_path = process_video(uploaded_file, fps, style)
+
+            # Show download button for the processed video
+            with open(output_video_path, "rb") as f:
+                st.download_button(
+                    label="Download Full Animation",
+                    data=f,
+                    file_name="output_full_animation.mp4",
+                    mime="video/mp4"
+                )
+            st.success("Video processed successfully!")
+
+if __name__ == "__main__":
+    main()
